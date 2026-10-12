@@ -128,6 +128,12 @@ h2{font-size:28px;margin:0 0 4px;line-height:1.1}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--on-ink);font-family:var(--display);font-weight:600;padding:10px 18px;border-radius:14px;border:3px solid var(--edge);font-size:16px;z-index:40;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
 .toast.on{opacity:1}
 @media (prefers-reduced-motion: reduce){.track{transition:none}}
+.cbody .btn{margin-top:8px;align-self:flex-start}
+.add input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--blue)}
+.chk{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:600}
+.lrow{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--paper);border:3px solid var(--edge);border-radius:16px;padding:8px 12px;margin-bottom:10px}
+.lrow b{font-family:var(--display);font-size:16px;line-height:1.2;display:block;margin-top:2px}
+.lrow .btn{font-size:15px;padding:5px 12px;border-radius:12px;box-shadow:0 3px 0 var(--shade);flex:none}
 </style>
 </head>
 <body>
@@ -151,6 +157,7 @@ h2{font-size:28px;margin:0 0 4px;line-height:1.1}
   <section id="p-iklan" role="tabpanel" aria-labelledby="t-iklan">
     <h2>Iklan terkini</h2>
     <p class="sub">Leret ke bawah untuk lihat semua iklan.</p>
+    <div class="note" id="adnote" hidden>Dikesan automatik daripada sumber awam di internet. Tekan "Lihat sumber" untuk ke iklan asal.</div>
     
     
     <div class="grid" id="adgrid"></div>
@@ -186,17 +193,30 @@ h2{font-size:28px;margin:0 0 4px;line-height:1.1}
 
   <!-- ADMIN -->
   <section id="p-admin" role="tabpanel" aria-labelledby="t-admin" hidden>
-    <h2>Menunggu semakan</h2>
-    <p class="sub">Dikesan dan diringkaskan oleh AI. Anda cuma lulus atau tolak.</p>
-    <div class="note">Data contoh. Versi sebenar perlukan log masuk admin dan data disimpan dalam Firebase.</div>
-    <div id="queue"></div>
-    <div class="add">
-      <h3 style="margin:0;font-family:var(--display)">Tambah manual</h3>
-      <select id="a-type" aria-label="Jenis"><option value="iklan">Iklan</option><option value="cabutan">Peraduan</option></select>
-      <input id="a-title" placeholder="Tajuk">
-      <textarea id="a-desc" rows="3" placeholder="Keterangan"></textarea>
-      <input id="a-src" placeholder="Sumber atau nama page (untuk kredit)">
-      <button class="btn" id="a-save">Simpan dan papar</button>
+    <div id="login" class="add" hidden>
+      <h2>Log masuk admin</h2>
+      <input id="l-email" type="email" autocomplete="username" placeholder="Emel admin" aria-label="Emel admin">
+      <input id="l-pass" type="password" autocomplete="current-password" placeholder="Kata laluan" aria-label="Kata laluan">
+      <button class="btn" id="l-btn">Log masuk</button>
+      <div class="src" id="l-err" role="alert"></div>
+    </div>
+    <div id="adminbody">
+      <h2>Menunggu semakan</h2>
+      <p class="sub">Item mencurigakan masuk ke sini dahulu. Selebihnya terus tayang dan boleh anda buang.</p>
+      <div class="note" id="adminnote"></div>
+      <div id="queue"></div>
+      <div id="livewrap" hidden><h2 style="margin-top:26px">Sedang tayang</h2><div id="livelist"></div></div>
+      <div class="add">
+        <h3 style="margin:0">Tambah manual</h3>
+        <select id="a-type" aria-label="Jenis"><option value="iklan">Iklan</option><option value="cabutan">Peraduan</option></select>
+        <input id="a-title" placeholder="Tajuk">
+        <textarea id="a-desc" rows="3" placeholder="Keterangan"></textarea>
+        <input id="a-src" placeholder="Sumber atau nama page (untuk kredit)">
+        <input id="a-price" placeholder="Harga (pilihan, untuk iklan)">
+        <label class="chk"><input type="checkbox" id="a-feat"> Iklan Ditaja (berbayar, naik di atas)</label>
+        <button class="btn" id="a-save">Simpan dan papar</button>
+      </div>
+      <button class="btn ghost" id="logout" hidden style="margin-top:18px">Log keluar</button>
     </div>
   </section>
 </main>
@@ -204,11 +224,16 @@ h2{font-size:28px;margin:0 0 4px;line-height:1.1}
 
 <div class="toast" id="toast" role="status"></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script>
 (function(){
-var DAY=86400000, WA='60123456789';
+var DAY=86400000;
 var $=function(s){return document.querySelector(s)};
-function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function safeUrl(u){return /^https?:\/\//i.test(u||'')?u:''}
 function poster(c1,c2,e){
   var P=['#E0463B','#2C74E0','#EE8420','#23A047','#7B4FD0'],h=0,k=String(c1)+e;
   for(var i=0;i<k.length;i++)h=(h*31+k.charCodeAt(i))|0;
@@ -216,17 +241,19 @@ function poster(c1,c2,e){
   var svg="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600'><rect width='800' height='600' fill='"+c+"'/><circle cx='650' cy='130' r='160' fill='rgba(255,255,255,.2)'/><circle cx='110' cy='520' r='200' fill='rgba(255,255,255,.16)'/><text x='400' y='370' font-size='230' text-anchor='middle'>"+e+"</text></svg>";
   return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
 }
+function palette(s){var P=[['#5B2FBF','#E052B5'],['#D1561F','#FFB347'],['#0F7A6B','#5FD3B5'],['#2B6CB0','#63B3ED'],['#B0306A','#F27DA8']];var h=0;s=String(s);for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return P[Math.abs(h)%P.length]}
 function daysLeft(d){return Math.max(0,Math.ceil((d-Date.now())/DAY))}
 function fmt(d){return d.toLocaleDateString('ms-MY',{day:'numeric',month:'short',year:'numeric'})}
 function inDays(n){return new Date(Date.now()+n*DAY)}
+function todayISO(){return new Date().toISOString().slice(0,10)}
+function toast(m){var t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(function(){t.classList.remove('on')},2600)}
 
+/* ---------- data contoh (dipakai bila Firebase belum disambung) ---------- */
 var ads=[
- {t:'Sourdough homemade, tempahan Deepavali',d:'Roti sourdough segar setiap pagi. Ambil sendiri atau hantar sekitar Shah Alam.',c:'Makanan',p:'RM18 / buku',pl:'Shah Alam',a:'#C8742B',b:'#F2B84B',e:'🍞',f:true},
- {t:'Servis aircond dan cuci',d:'Cuci, tukar gas dan baiki. Teknisian berpengalaman, waranti 30 hari.',c:'Perkhidmatan',p:'Dari RM60',pl:'Klang Valley',a:'#1B6CA8',b:'#58B8E8',e:'❄️',f:true},
- {t:'Telefon terpakai, keadaan cantik',d:'Bateri 92%, ada kotak dan pengecas asal. Boleh COD sekitar Bangi.',c:'Gajet',p:'RM850',pl:'Bangi',a:'#3D3D8F',b:'#8E7CF0',e:'📱'},
- {t:'Baju kurung moden, siap jahit',d:'Pelbagai saiz dan warna, kain ringan sesuai untuk raya dan kenduri.',c:'Fesyen',p:'Dari RM89',pl:'Online',a:'#B0306A',b:'#F27DA8',e:'👗'},
- {t:'Nasi lemak bungkus untuk majlis',d:'Minimum 30 bungkus. Termasuk telur, ikan bilis dan sambal.',c:'Makanan',p:'RM3.50 / bungkus',pl:'Kajang',a:'#2F8F4E',b:'#9BD66B',e:'🍛'},
- {t:'Laptop gaming, boleh tawar',d:'RAM 16GB, SSD 512GB, graphic card berdedikasi. Masih dalam waranti.',c:'Gajet',p:'RM2,300',pl:'Cheras',a:'#2B2F3A',b:'#E8452C',e:'💻'}
+ {t:'Sourdough homemade, tempahan Deepavali',d:'Roti sourdough segar setiap pagi. Ambil sendiri atau hantar sekitar Shah Alam.',p:'RM18 / buku',pl:'Shah Alam',a:'#C8742B',b:'#F2B84B',e:'🍞',f:true},
+ {t:'Servis aircond dan cuci',d:'Cuci, tukar gas dan baiki. Teknisian berpengalaman, waranti 30 hari.',p:'Dari RM60',pl:'Klang Valley',a:'#1B6CA8',b:'#58B8E8',e:'❄️',f:true},
+ {t:'Telefon terpakai, keadaan cantik',d:'Bateri 92%, ada kotak dan pengecas asal. Boleh COD sekitar Bangi.',p:'RM850',pl:'Bangi',a:'#3D3D8F',b:'#8E7CF0',e:'📱'},
+ {t:'Baju kurung moden, siap jahit',d:'Pelbagai saiz dan warna, kain ringan sesuai untuk raya dan kenduri.',p:'Dari RM89',pl:'Online',a:'#B0306A',b:'#F27DA8',e:'👗'}
 ];
 var contests=[
  {t:'Menang telefon pintar baharu',d:'Ikut page, like dan tag 3 rakan di post asal. Pemenang diumumkan secara langsung.',pr:'Hadiah: 1 unit telefon pintar',src:'Kedai Gajet Bangi',end:inDays(5),a:'#5B2FBF',b:'#E052B5',e:'🎁'},
@@ -234,26 +261,53 @@ var contests=[
  {t:'Cabutan bertuah ulang tahun ke-3',d:'Beli apa sahaja berbaloi RM30 dan masuk cabutan automatik.',pr:'Hadiah utama: mesin basuh',src:'Pasaraya Mini Maju',end:inDays(21),a:'#0F7A6B',b:'#5FD3B5',e:'🎉'}
 ];
 var pending=[
- {type:'cabutan',t:'Giveaway iPhone oleh Kedai Gajet Bangi',d:'Sertai dengan like dan kongsi post. Tutup 31 Oktober.',src:'kedaigajet.example.my/peraduan',score:94,why:'Ada hadiah dan tarikh tutup, syarat jelas, tiada bayaran.',days:20,e:'📲',a:'#2B6CB0',b:'#63B3ED'},
- {type:'iklan',t:'Roti canai frozen, borong',d:'Pek 10 keping, sesuai untuk kedai makan. Hantar sekitar Selangor.',src:'borongfrozen.example.my',score:88,why:'Iklan jelas dengan harga dan kawasan.',e:'🥞',a:'#B7791F',b:'#F6AD55',c:'Makanan',p:'RM12 / pek',pl:'Selangor'},
- {type:'cabutan',t:'Menang RM1,000, bayar RM50 untuk sertai',d:'Hantar yuran penyertaan ke akaun peribadi untuk dapat nombor cabutan.',src:'akaun-baru.example',score:12,why:'Minta bayaran untuk sertai, akaun baru. Kemungkinan penipuan.',days:7,e:'⚠️',a:'#9B2C2C',b:'#FC8181',bad:true},
- {type:'iklan',t:'Servis kereta panggilan ke rumah',d:'Tukar minyak hitam, bateri dan tayar di rumah anda.',src:'servisrumah.example.my',score:81,why:'Perkhidmatan sah, ada kawasan liputan.',e:'🔧',a:'#2D3748',b:'#718096',c:'Perkhidmatan',p:'Dari RM120',pl:'Klang Valley'}
+ {type:'cabutan',t:'Giveaway iPhone oleh Kedai Gajet Bangi',d:'Sertai dengan like dan kongsi post. Tutup 31 Oktober.',src:'kedaigajet.example.my',score:94,why:'Ada hadiah dan tarikh tutup, syarat jelas, tiada bayaran.',days:20,e:'📲',a:'#2B6CB0',b:'#63B3ED'},
+ {type:'iklan',t:'Roti canai frozen, borong',d:'Pek 10 keping, sesuai untuk kedai makan. Hantar sekitar Selangor.',src:'borongfrozen.example.my',score:88,why:'Iklan jelas dengan harga dan kawasan.',e:'🥞',a:'#B7791F',b:'#F6AD55',p:'RM12 / pek',pl:'Selangor'},
+ {type:'cabutan',t:'Menang RM1,000, bayar RM50 untuk sertai',d:'Hantar yuran penyertaan ke akaun peribadi untuk dapat nombor cabutan.',src:'akaun-baru.example',score:12,why:'Minta bayaran untuk sertai, akaun baru. Kemungkinan penipuan.',days:7,e:'⚠️',a:'#9B2C2C',b:'#FC8181',bad:true}
 ];
-var cats=['Semua','Makanan','Fesyen','Gajet','Perkhidmatan'], cat='Semua';
 
-function toast(m){var t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(function(){t.classList.remove('on')},2400)}
+/* ---------- Firebase ---------- */
+var cfg=window.FIREBASE_CONFIG, live=false, db=null, auth=null, user=null;
+if(cfg&&cfg.apiKey&&String(cfg.apiKey).indexOf('ISI')!==0&&window.firebase){
+  try{firebase.initializeApp(cfg);db=firebase.firestore();auth=firebase.auth();live=true;ads=[];contests=[];pending=[]}
+  catch(e){console.error(e)}
+}
+function fail(e){
+  console.error(e);
+  var hint=(e&&e.code==='permission-denied')?' Semak firestore.rules.':'';
+  $('#srcnote').textContent='Gagal memuat data Firebase ('+((e&&e.code)||'ralat')+').'+hint;
+}
+function toAd(d){var x=d.data(),p=palette(d.id);return {id:d.id,t:x.title||'',d:x.summary||'',p:x.price||'',pl:x.place||x.source||'',a:p[0],b:p[1],e:'🛍️',f:!!x.featured,img:safeUrl(x.image),link:safeUrl(x.link),found:x.found||''}}
+function toContest(d){var x=d.data(),p=palette(d.id);return {id:d.id,t:x.title||'',d:x.summary||'',pr:'',src:x.source||'',link:safeUrl(x.link),img:safeUrl(x.image),end:x.end?new Date(x.end+'T23:59:00+08:00'):null,a:p[0],b:p[1],e:'🎁'}}
+function loadPublic(){
+  if(!live) return;
+  db.collection('iklan').where('status','==','live').limit(40).get().then(function(sn){
+    ads=sn.docs.map(toAd).sort(function(a,b){return a.found<b.found?1:-1});
+    renderAds();
+  }).catch(fail);
+  db.collection('peraduan').where('status','==','live').limit(40).get().then(function(sn){
+    var now=Date.now();
+    contests=sn.docs.map(toContest).filter(function(c){return !c.end||c.end.getTime()>=now-DAY}).sort(function(a,b){
+      if(!a.end&&!b.end) return 0; if(!a.end) return 1; if(!b.end) return -1; return a.end-b.end;
+    });
+    idx=0;renderSlides();
+  }).catch(fail);
+}
 
-/* IKLAN */
+/* ---------- IKLAN ---------- */
 var ratios=['4/5','1/1','3/4','5/6','1/1','4/5'];
 function renderAds(){
   var list=ads.slice().sort(function(x,y){return (y.f?1:0)-(x.f?1:0)});
   $('#adgrid').innerHTML=list.length?list.map(function(a,i){
-    return '<article class="card"><div class="pic"><img alt="" style="aspect-ratio:'+ratios[i%ratios.length]+'" src="'+poster(a.a,a.b,a.e)+'">'+(a.f?'<span class="badge">Ditaja</span>':'')+'</div>'
-     +'<div class="cbody"><h3>'+esc(a.t)+'</h3><p>'+esc(a.d)+'</p><div class="meta"><span class="price">'+esc(a.p)+'</span><span>'+esc(a.pl)+'</span></div></div></article>';
-  }).join(''):'<div class="empty">Belum ada iklan.</div>';
+    var fb=poster(a.a,a.b,a.e);
+    return '<article class="card"><div class="pic"><img alt="" style="aspect-ratio:'+ratios[i%ratios.length]+'" src="'+esc(a.img||fb)+'" data-fb="'+esc(fb)+'" onerror="this.onerror=null;this.src=this.dataset.fb">'+(a.f?'<span class="badge">Ditaja</span>':'')+'</div>'
+     +'<div class="cbody"><h3>'+esc(a.t)+'</h3><p>'+esc(a.d)+'</p>'
+     +((a.p||a.pl)?'<div class="meta"><span class="price">'+esc(a.p)+'</span><span>'+esc(a.pl)+'</span></div>':'')
+     +(a.link?'<a class="btn" href="'+esc(a.link)+'" target="_blank" rel="noopener">Lihat sumber</a>':'')+'</div></article>';
+  }).join(''):'<div class="empty">'+(live?'Belum ada iklan. Ia akan muncul selepas pengambil data dijalankan.':'Belum ada iklan.')+'</div>';
 }
 
-/* SLIDER */
+/* ---------- SLIDER ---------- */
 var idx=0,timer=null,interval=5000,playing=true,hold=false;
 function renderSlides(){
   $('#track').innerHTML=contests.map(function(c){
@@ -268,6 +322,7 @@ function renderSlides(){
     var fb=poster(c.a,c.b,c.e);
     return '<button class="row" data-go="'+i+'"><img alt="" src="'+esc(c.img||fb)+'" data-fb="'+esc(fb)+'" onerror="this.onerror=null;this.src=this.dataset.fb"><span><b>'+esc(c.t)+'</b><small>'+(c.end?daysLeft(c.end)+' hari lagi':esc(c.src))+'</small></span></button>';
   }).join('');
+  if(!contests.length){$('#track').innerHTML='<div class="slide"><div class="sbody"><h3>Belum ada peraduan</h3><p>'+(live?'Peraduan akan muncul selepas pengambil data dijalankan.':'Belum ada peraduan.')+'</p></div></div>'}
   idx=Math.min(idx,Math.max(0,contests.length-1));
   go(idx,true);
 }
@@ -286,7 +341,7 @@ function schedule(){
   timer=setTimeout(function(){go(idx+1)},interval);
 }
 function go(i,noSched){
-  var n=contests.length; if(!n){$('#track').innerHTML='';return}
+  var n=contests.length; if(!n) return;
   idx=(i+n)%n;
   $('#track').style.transform='translateX('+(-idx*100)+'%)';
   Array.prototype.forEach.call(document.querySelectorAll('.dot'),function(d,k){d.setAttribute('aria-current',k===idx)});
@@ -312,21 +367,43 @@ vp.addEventListener('mouseenter',function(){hold=true;schedule()});
 vp.addEventListener('mouseleave',function(){hold=false;schedule()});
 document.addEventListener('visibilitychange',function(){hold=document.hidden;schedule()});
 
-/* ADMIN */
+/* ---------- ADMIN ---------- */
+var adminPending=[],adminLive=[],curList=[];
+function mapAdmin(col,d){var x=d.data();return {col:col,id:d.id,type:col==='iklan'?'iklan':'cabutan',t:x.title||'',d:x.summary||'',src:x.source||'',why:x.why||'',flag:!!x.flag}}
+function loadAdmin(){
+  if(!live||!user) return;
+  var jobs=[];
+  ['iklan','peraduan'].forEach(function(col){
+    ['pending','live'].forEach(function(st){
+      jobs.push(db.collection(col).where('status','==',st).limit(60).get().then(function(sn){return sn.docs.map(function(d){return mapAdmin(col,d)})}));
+    });
+  });
+  Promise.all(jobs).then(function(r){
+    adminPending=r[0].concat(r[2]);adminLive=r[1].concat(r[3]);renderQueue();
+  }).catch(function(e){toast('Gagal memuat admin: '+((e&&e.code)||'ralat'))});
+}
+function typeName(t){return t==='iklan'?'Iklan':'Peraduan'}
 function renderQueue(){
-  $('#pcount').textContent=pending.length;
-  $('#pcount').hidden=!pending.length;
-  $('#queue').innerHTML=pending.length?pending.map(function(p,i){
-    return '<div class="q'+(p.bad?' bad':'')+'"><span class="pill">'+(p.type==='iklan'?'Iklan':'Peraduan')+'</span><span class="pill'+(p.bad?' red':'')+'">Skor AI '+p.score+'</span>'
+  curList=live?adminPending:pending.map(function(p,i){return {demo:i,type:p.type,t:p.t,d:p.d,src:p.src,why:p.why,flag:p.bad,score:p.score}});
+  $('#pcount').textContent=curList.length;
+  $('#pcount').hidden=!curList.length;
+  $('#queue').innerHTML=curList.length?curList.map(function(p,i){
+    return '<div class="q'+(p.flag?' bad':'')+'"><span class="pill">'+typeName(p.type)+'</span>'
+     +(p.score!=null?'<span class="pill'+(p.flag?' red':'')+'">Skor AI '+p.score+'</span>':(p.flag?'<span class="pill red">Perlu semak</span>':''))
      +'<h3 style="margin-top:8px">'+esc(p.t)+'</h3><p>'+esc(p.d)+'</p>'
-     +'<p><b>Sebab:</b> '+esc(p.why)+'<br>Sumber: '+esc(p.src)+'</p>'
+     +'<p>'+(p.why?'<b>Sebab:</b> '+esc(p.why)+'<br>':'')+'Sumber: '+esc(p.src)+'</p>'
      +'<div class="qa"><button class="btn" data-ok="'+i+'">Lulus</button><button class="btn ghost" data-no="'+i+'">Tolak</button></div></div>';
   }).join(''):'<div class="empty">Tiada item menunggu. Semua sudah disemak.</div>';
+  if(live){
+    $('#livelist').innerHTML=adminLive.length?adminLive.map(function(p,i){
+      return '<div class="lrow"><span><span class="pill">'+typeName(p.type)+'</span><b>'+esc(p.t)+'</b></span><button class="btn ghost" data-rm="'+i+'">Buang</button></div>';
+    }).join(''):'<div class="empty">Tiada item sedang tayang.</div>';
+  }
 }
-function approve(i){
+function approveDemo(i){
   var p=pending.splice(i,1)[0];
   if(p.type==='iklan'){
-    ads.unshift({t:p.t,d:p.d,c:p.c||'Perkhidmatan',p:p.p||'Tanya harga',pl:p.pl||'Malaysia',a:p.a,b:p.b,e:p.e});
+    ads.unshift({t:p.t,d:p.d,p:p.p||'Tanya harga',pl:p.pl||'Malaysia',a:p.a,b:p.b,e:p.e});
     renderAds();toast('Diluluskan dan masuk ke tab Iklan');
   }else{
     contests.push({t:p.t,d:p.d,pr:'',src:p.src,link:p.link,img:p.img,end:inDays(p.days||14),a:p.a,b:p.b,e:p.e});
@@ -334,56 +411,80 @@ function approve(i){
   }
   renderQueue();
 }
+function decide(item,status){
+  if(!item) return;
+  if(!live){
+    if(status==='live') approveDemo(item.demo); else {pending.splice(item.demo,1);renderQueue();toast('Ditolak')}
+    return;
+  }
+  var col=item.col;
+  db.collection(col).doc(item.id).update({status:status}).then(function(){
+    toast(status==='live'?'Diluluskan dan terus tayang':'Dibuang daripada paparan');
+    loadAdmin();loadPublic();
+  }).catch(function(e){toast('Gagal: '+((e&&e.code)||'ralat')+'. Anda mesti log masuk sebagai admin.')});
+}
 $('#queue').addEventListener('click',function(e){
   var ok=e.target.getAttribute('data-ok'),no=e.target.getAttribute('data-no');
-  if(ok!==null) approve(+ok);
-  if(no!==null){pending.splice(+no,1);renderQueue();toast('Ditolak')}
+  if(ok!==null) decide(curList[+ok],'live');
+  if(no!==null) decide(curList[+no],'rejected');
+});
+$('#livelist').addEventListener('click',function(e){
+  var rm=e.target.getAttribute('data-rm');
+  if(rm!==null) decide(adminLive[+rm],'rejected');
 });
 $('#a-save').onclick=function(){
-  var t=$('#a-title').value.trim(),d=$('#a-desc').value.trim(),s=$('#a-src').value.trim()||'Admin';
+  var type=$('#a-type').value,t=$('#a-title').value.trim(),d=$('#a-desc').value.trim(),s=$('#a-src').value.trim()||'Admin';
+  var price=$('#a-price').value.trim(),feat=$('#a-feat').checked;
   if(!t||!d){toast('Isi tajuk dan keterangan dahulu');return}
-  if($('#a-type').value==='iklan'){
-    ads.unshift({t:t,d:d,c:'Perkhidmatan',p:'Tanya harga',pl:s,a:'#0F4C3A',b:'#5FB58F',e:'🛍️'});renderAds();toast('Iklan ditambah');
-  }else{
-    contests.push({t:t,d:d,pr:'Lihat syarat di page asal',src:s,end:inDays(14),a:'#7A3FB0',b:'#E07BC0',e:'🎁'});renderSlides();toast('Peraduan ditambah ke slider');
+  function clear(){$('#a-title').value='';$('#a-desc').value='';$('#a-src').value='';$('#a-price').value='';$('#a-feat').checked=false}
+  if(!live){
+    if(type==='iklan'){ads.unshift({t:t,d:d,p:price,pl:s,a:'#0F4C3A',b:'#5FB58F',e:'🛍️',f:feat});renderAds();toast('Iklan ditambah')}
+    else{contests.push({t:t,d:d,pr:'',src:s,end:inDays(14),a:'#7A3FB0',b:'#E07BC0',e:'🎁'});renderSlides();toast('Peraduan ditambah ke slider')}
+    clear();return;
   }
-  $('#a-title').value='';$('#a-desc').value='';$('#a-src').value='';
+  var doc={type:type==='iklan'?'iklan':'peraduan',title:t,summary:d,source:s,price:price,featured:feat,status:'live',flag:false,end:null,link:'',image:'',found:todayISO()};
+  db.collection(type==='iklan'?'iklan':'peraduan').add(doc).then(function(){
+    toast('Disimpan dan terus tayang');clear();loadAdmin();loadPublic();
+  }).catch(function(e){toast('Gagal: '+((e&&e.code)||'ralat')+'. Anda mesti log masuk sebagai admin.')});
 };
+function syncAdmin(){
+  var need=live&&!user;
+  $('#login').hidden=!need;
+  $('#adminbody').hidden=need;
+  $('#logout').hidden=!(live&&user);
+  $('#livewrap').hidden=!live;
+  $('#adnote').hidden=!live;
+  $('#adminnote').textContent=live?'Disambung ke Firebase. Hanya akaun admin boleh lulus atau buang.':'Data contoh. Sambungkan Firebase untuk data sebenar.';
+  $('#srcnote').textContent=live?'Data langsung daripada Firebase.':'Data contoh. Sambungkan Firebase untuk data sebenar.';
+}
+if(live){
+  $('#l-btn').onclick=function(){
+    $('#l-err').textContent='';
+    auth.signInWithEmailAndPassword($('#l-email').value.trim(),$('#l-pass').value).then(function(){$('#l-pass').value=''}).catch(function(e){
+      $('#l-err').textContent='Gagal log masuk: '+((e&&e.code)||'ralat');
+    });
+  };
+  $('#logout').onclick=function(){auth.signOut()};
+  auth.onAuthStateChanged(function(u){user=u;syncAdmin();if(u)loadAdmin()});
+}
 
-/* TABS + events */
+/* ---------- TAB + peristiwa ---------- */
 function setTab(id){
   ['iklan','cabutan','admin'].forEach(function(k){
     $('#p-'+k).hidden=(k!==id);
     $('#t-'+k).setAttribute('aria-selected',k===id);
   });
-  
   window.scrollTo(0,0);
   schedule();
 }
 document.querySelector('.tabs').addEventListener('click',function(e){
   var b=e.target.closest('[data-tab]'); if(b) setTab(b.getAttribute('data-tab'));
 });
-
 document.addEventListener('click',function(e){
   var g=e.target.closest('[data-go]'); if(g){go(+g.getAttribute('data-go'));if(g.classList.contains('row'))$('#vp').scrollIntoView({behavior:'smooth',block:'center'})}
 });
 
-
-renderAds();renderSlides();renderQueue();
-
-/* Data sebenar: dimuat bila dihos bersama data/peraduan.json (GitHub Pages). Di sini gagal senyap, guna data contoh. */
-function palette(s){var P=[['#5B2FBF','#E052B5'],['#D1561F','#FFB347'],['#0F7A6B','#5FD3B5'],['#2B6CB0','#63B3ED'],['#B0306A','#F27DA8']];var h=0;for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return P[Math.abs(h)%P.length]}
-function fromItem(x){var p=palette(x.id||x.title);return {t:x.title,d:x.summary,pr:'',src:x.source,link:x.link,img:x.image||'',end:x.end?new Date(x.end+'T23:59:00+08:00'):null,a:p[0],b:p[1],e:'🎁',why:x.why}}
-try{
-  fetch('data/peraduan.json',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('tiada data');return r.json()}).then(function(j){
-    var live=[],flag=[];
-    (j.items||[]).forEach(function(x){(x.flag?flag:live).push(fromItem(x))});
-    contests=live;
-    pending=flag.map(function(c){return {type:'cabutan',t:c.t,d:c.d,src:c.src,score:20,why:c.why||'Perlu semakan',bad:true,days:14,e:'⚠️',a:c.a,b:c.b,link:c.link,img:c.img}});
-    renderSlides();renderQueue();
-    $('#srcnote').textContent='Data langsung, dikemas kini '+new Date(j.updated).toLocaleString('ms-MY',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'.';
-  }).catch(function(){});
-}catch(err){}
+syncAdmin();renderAds();renderSlides();renderQueue();loadPublic();
 })();
 </script>
 </body>
