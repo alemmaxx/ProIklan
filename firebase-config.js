@@ -1,8 +1,10 @@
-// Tampal config web app Firebase anda di sini (Project settings > Your apps > Web).
-// Nilai ini bukan rahsia; keselamatan dijaga oleh firestore.rules.
+// Config web app Firebase (bukan rahsia; keselamatan dijaga oleh firestore.rules).
 window.FIREBASE_CONFIG = {
-  apiKey: "ISI_API_KEY",
-  authDomain: "ISI.firebaseapp.com",
-  projectId: "ISI",
-  appId: "ISI"
+  apiKey: "AIzaSyAi5O-7iD9E67Gc_mLLW726_ms5EkmV-5U",
+  authDomain: "ar-trading-b246f.firebaseapp.com",
+  projectId: "ar-trading-b246f",
+  storageBucket: "ar-trading-b246f.firebasestorage.app",
+  messagingSenderId: "252959184778",
+  appId: "1:252959184778:web:f0eb94f71a56941ffb1a73"
 };
+ 
