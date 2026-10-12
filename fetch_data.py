@@ -6,7 +6,7 @@ Guna:
   python fetch_data.py --dry            -> ambil dan PAPAR sahaja, tiada tulis (uji sumber di komputer anda)
   python fetch_data.py --test fail.xml  -> uji parsing satu fail RSS/Atom tanpa internet
 
-Sumber diset dalam sources.json ("type": "peraduan" atau "iklan").
+Sumber diset dalam sources.json ("type": "peraduan" atau "iklan"; "format": "sitemap" untuk laman tanpa RSS).
 Facebook/Instagram TIDAK disokong (dilarang scrape).
 Hanya tajuk, ringkasan pendek (maks 220 aksara), imej dan pautan asal disimpan.
 Status keputusan admin (lulus/tolak) tidak akan ditimpa bila item dikemas kini.
@@ -17,10 +17,13 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 ROOT = Path(__file__).parent
 SOURCES = ROOT / "sources.json"
@@ -140,14 +143,161 @@ def fetch(url, timeout=20):
         return r.read()
 
 
+# ---------- robots.txt (ikut semantik Google: padanan terpanjang menang) ----------
+_ROBOTS = {}
+
+
+def parse_robots(txt):
+    groups, agents, rules, last_agent = [], [], [], False
+    for raw in txt.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" not in line:
+            continue
+        k, v = [x.strip() for x in line.split(":", 1)]
+        k = k.lower()
+        if k == "user-agent":
+            if not last_agent and agents:
+                groups.append((agents, rules))
+                agents, rules = [], []
+            agents.append(v.lower())
+            last_agent = True
+        elif k in ("allow", "disallow"):
+            last_agent = False
+            rules.append((k == "allow", v))
+    if agents:
+        groups.append((agents, rules))
+    me = UA.split("/")[0].lower()
+    chosen = [r for a, r in groups if any(x != "*" and x in me for x in a)] or [r for a, r in groups if "*" in a]
+    return [rule for g in chosen for rule in g]
+
+
+def path_allowed(rules, path):
+    best_len, best_allow = -1, True
+    for allow, pat in rules:
+        if not pat:
+            continue
+        rx = re.escape(pat).replace(r"\*", ".*")
+        if rx.endswith(r"\$"):
+            rx = rx[:-2] + "$"
+        if re.match(rx, path) and (len(pat) > best_len or (len(pat) == best_len and allow)):
+            best_len, best_allow = len(pat), allow
+    return best_allow
+
+
+def robots_ok(url):
+    u = urlparse(url)
+    root = f"{u.scheme}://{u.netloc}"
+    if root not in _ROBOTS:
+        try:
+            _ROBOTS[root] = parse_robots(fetch(root + "/robots.txt").decode("utf-8", "ignore"))
+        except urllib.error.HTTPError as e:
+            _ROBOTS[root] = [] if e.code == 404 else None
+        except Exception:
+            _ROBOTS[root] = None
+    rules = _ROBOTS[root]
+    if rules is None:  # tidak dapat baca robots.txt -> jangan ambil
+        return False
+    return path_allowed(rules, (u.path or "/") + ("?" + u.query if u.query else ""))
+
+
+# ---------- sumber jenis sitemap (laman tanpa RSS) ----------
+DEFAULT_EXCLUDE = re.compile(
+    r"/(go|api|admin|dashboard|auth|login|register|tag|tags|category|kategori|page|about|privacy|terms|contact)(/|$)", re.I)
+
+
+def meta(h, prop):
+    for pat in (r'<meta[^>]+(?:property|name)=["\']%s["\'][^>]*?content=["\']([^"\']*)["\']',
+                r'<meta[^>]+content=["\']([^"\']*)["\'][^>]*?(?:property|name)=["\']%s["\']'):
+        m = re.search(pat % re.escape(prop), h, re.I)
+        if m:
+            return clean(m.group(1))
+    return ""
+
+
+def parse_sitemap(xml_bytes):
+    root = ET.fromstring(xml_bytes)
+    out = []
+    for e in root:
+        loc = child_text(e, "loc")
+        if loc:
+            out.append((loc, child_text(e, "lastmod")))
+    return local(root.tag), out
+
+
+def parse_page(url, h, source_name, ref, kind):
+    m = re.search(r"<title[^>]*>(.*?)</title>", h, re.S | re.I)
+    title = meta(h, "og:title") or (clean(m.group(1)) if m else "")
+    if not title:
+        return None
+    summary = meta(h, "og:description") or meta(h, "description")
+    image = meta(h, "og:image")
+    image = urljoin(url, image) if image else ""
+    body = clean(re.sub(r"<(script|style|noscript)[^>]*>.*?</\1>", " ", h, flags=re.S | re.I))[:3000]
+    head = title + " " + summary
+    # Semua tarikh dalam tajuk/ringkasan sudah lepas -> peraduan tamat.
+    if find_end_date(head, ref) is None and DATE_RE.search(head):
+        return None
+    end = find_end_date(head + " " + body, ref)
+    hit = [k for k in SCAM if k in (head + " " + body).lower() + " "]
+    return {
+        "id": hashlib.sha1(url.encode()).hexdigest()[:20],
+        "type": kind,
+        "title": title[:140],
+        "summary": summary[:220],
+        "link": url,
+        "source": source_name,
+        "image": image,
+        "end": end.isoformat() if end else None,
+        "flag": bool(hit),
+        "why": ("Mengandungi frasa mencurigakan: " + ", ".join(hit)) if hit else "",
+        "found": ref.isoformat(),
+    }
+
+
+def collect_sitemap(src, ref, kind, delay=1.0):
+    kindname, entries = parse_sitemap(fetch(src["url"]))
+    if kindname == "sitemapindex":  # satu aras sub-sitemap
+        sub = []
+        for loc, _ in entries[:5]:
+            sub += parse_sitemap(fetch(loc))[1]
+        entries = sub
+    inc = re.compile(src["include"]) if src.get("include") else None
+    exc = re.compile(src["exclude"]) if src.get("exclude") else None
+    urls = []
+    for loc, last in entries:
+        path = urlparse(loc).path
+        if path in ("", "/") or DEFAULT_EXCLUDE.search(path):
+            continue
+        if (inc and not inc.search(loc)) or (exc and exc.search(loc)):
+            continue
+        if not robots_ok(loc):
+            continue
+        urls.append((last, loc))
+    urls.sort(reverse=True)  # lastmod terbaru dahulu
+    items = []
+    for last, loc in urls[: int(src.get("limit", 15))]:
+        try:
+            it = parse_page(loc, fetch(loc).decode("utf-8", "ignore"), src["name"], ref, kind)
+            if it:
+                items.append(it)
+        except Exception as ex:
+            print("  langkau", loc, "-", ex)
+        time.sleep(delay)
+    return items
+
+
 def collect(ref):
     merged = {}
     for src in json.loads(SOURCES.read_text(encoding="utf-8")):
         kind = src.get("type", "peraduan")
         try:
-            for it in parse_feed(fetch(src["url"]), src["name"], ref, kind):
+            if src.get("format") == "sitemap":
+                found = collect_sitemap(src, ref, kind)
+            else:
+                found = parse_feed(fetch(src["url"]), src["name"], ref, kind)
+            for it in found:
                 merged[(kind, it["id"])] = it
-            print("OK   ", src["name"])
+            print("OK   ", src["name"], len(found))
         except Exception as ex:  # satu sumber gagal tidak patut hentikan yang lain
             print("GAGAL", src["name"], "-", ex)
     return list(merged.values())

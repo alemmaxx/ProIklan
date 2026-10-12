@@ -31,3 +31,9 @@ Edit `sources.json`. Blog WordPress ada RSS di `https://namablog.com/feed/`. "ty
 ## Had percuma
 Firestore Spark: 50,000 bacaan sehari. Setiap lawatan membaca sehingga 80 dokumen, jadi sekitar 600 lawatan sehari.
 Item lebih 30 hari dibuang automatik. Facebook/Instagram tidak boleh diambil.
+
+## Laman tanpa RSS (contoh: ContestKaki)
+Guna "format": "sitemap" dalam sources.json. Pengambil data baca sitemap.xml, ambil 15 halaman terbaru
+(tajuk, ringkasan, gambar dari tag og:), dan menghormati robots.txt (laluan yang dilarang dilangkau).
+Tapis halaman dengan "include" (regex URL), contoh: "include": "/contest/". Jeda 1 saat antara halaman.
+Semak dulu dengan `python fetch_data.py --dry`.

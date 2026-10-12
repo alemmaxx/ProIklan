@@ -1,4 +1,5 @@
 [
+  {"type": "peraduan", "name": "ContestKaki", "format": "sitemap", "url": "https://contestkaki.com/sitemap.xml", "limit": 15},
   {"type": "peraduan", "name": "Google News: peraduan", "url": "https://news.google.com/rss/search?q=peraduan+hadiah+when:14d&hl=ms&gl=MY&ceid=MY:ms"},
   {"type": "peraduan", "name": "Google News: giveaway", "url": "https://news.google.com/rss/search?q=giveaway+Malaysia+when:14d&hl=en-MY&gl=MY&ceid=MY:en"},
   {"type": "iklan", "name": "Google News: promosi", "url": "https://news.google.com/rss/search?q=promosi+diskaun+when:7d&hl=ms&gl=MY&ceid=MY:ms"}
